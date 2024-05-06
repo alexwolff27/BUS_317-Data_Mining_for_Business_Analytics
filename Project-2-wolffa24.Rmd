@@ -1,0 +1,325 @@
+---
+title: "Data Preparation, Partitioning, & Visualization"
+author: "Alex Wolff"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: cerulean
+    df_print: paged
+---
+
+## Load Packages
+```{r load_packages, message=FALSE}
+library(tidyverse)
+library(kableExtra)
+library(recipes)
+library(rsample)
+library(reshape2)
+options(scipen=999)
+```
+
+# Part 1 - New York City Flight Data
+
+## Load Data 1
+```{r load_data_1, message=FALSE}
+library(nycflights13)
+```
+
+## Question 1
+
+```{r Question_1, fig.height=5, fig.width=9, fig.align='center', warning=FALSE, message=FALSE}
+flights %>%
+  mutate(arrival = if_else(arr_delay > 0, "delayed", "ontime")) %>%
+  filter(dest %in% c("PHL", "RDU"),
+         month == 12) %>%
+  na.omit() %>%
+  ggplot() +  
+    geom_boxplot(aes(x = arrival, y = dep_delay, color = dest)) +  
+    facet_grid(dest ~ origin) +
+    labs(title = "On Time Performance of NYC Flights",
+         subtitle = "December 2013",
+         x = "Arrival", 
+         y = "Departure Delay",
+         color = "Destination")
+```
+
+The boxplots are demonstrating the effect of late departures on arrival times in relation to origin and destination. The x-axis is divided into three regions for each departing airport, which are further subdivided into two regions for delayed and on-time arrivals. The y-axis is divided into two sections, one for each arrival airport, that each show the average delay time in minutes. Finally, based on the data, the graph shows that departure delays translate to arrival delays.
+
+## Question 2
+
+```{r Question_2, fig.height=5, fig.width=9, fig.align='center', warning=FALSE, message=FALSE}
+flights %>%
+  left_join(weather, by = c("year", "month", "day", "origin")) %>%
+  group_by(year, month, day, origin) %>%
+  summarize(
+    avg_daily_dep_delay = mean(dep_delay, na.rm = TRUE),
+    avg_daily_temp = mean(temp, na.rm = TRUE)) %>%
+  ggplot(aes(x = avg_daily_temp, y = avg_daily_dep_delay, color = origin)) +
+    geom_point() +
+    geom_smooth() +
+    facet_wrap(~ origin)+
+    labs(title = "Relationship between Average Daily Temperature and Daily Departure Delay",
+         subtitle = "Flights Departing from NYC, 2013",
+         x = "Average Daily Temperature", 
+         y = "Average Daily Departure Delay",
+         color = "Origin")
+```
+
+# Part 2 - Bike Rentals in Washington, DC
+
+## Load Data 2
+```{r load_data_2, message=FALSE}
+bike_data <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/bike_share_day.csv")
+```
+
+## Question 3
+
+```{r Question_3}
+bike_data <- bike_data %>%
+  rename(index=instant,
+         date = dteday,
+         year = yr,
+         month = mnth,
+         ftemp = atemp,
+         humidity = hum,
+         casual_cnt = casual,
+         registered_cnt = registered,
+         total_count = cnt) %>%
+  mutate(
+    season = factor(season, 
+                    levels = c(2, 3, 4, 1), 
+                    labels = c("Spring", "Summer", "Fall", "Winter")),
+    holiday = factor(holiday, 
+                     levels = c(0, 1), 
+                     labels = c("no", 
+                                "yes")),
+    workingday = factor(workingday, 
+                        levels = c(0, 1), 
+                        labels = c("no", 
+                                   "yes")),
+    year = factor(year, 
+                  levels = c(0, 1), 
+                  labels = c("2011", 
+                             "2012")),
+    weathersit = factor(weathersit, 
+                        levels = c(1, 2, 3, 4), 
+                        labels = c("clear", 
+                                   "mist", 
+                                   "light precipitation", 
+                                   "heavy precipitation")),
+    raw_temp = temp * 41,
+    raw_ftemp = ftemp * 50,
+    raw_humidity = humidity * 100,
+    raw_windsped = windspeed * 67) 
+
+bike_data %>% 
+  head(50) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+```
+
+## Question 4
+
+```{r Question_4, fig.height=5, fig.width=9, fig.align='center', warning=FALSE, message=FALSE}
+bike_data %>%
+  mutate(date = as.Date(date, format = "%m/%d/%y")) %>%
+  ggplot(aes(x = date, y = total_count, color = raw_ftemp)) +
+  geom_point() +
+  scale_x_date(
+    date_breaks = "6 months", 
+    date_labels = "%Y-%m",) +
+  xlim(as.Date("2011-01-01"), as.Date("2012-12-31")) +
+  theme_minimal() +
+  labs(
+    title = "Bike Rentals in DC, 2011 and 2012",
+    subtitle = "Warmer Temperatures associated with more Bike Rentals",
+    x = "Date",
+    y = "Bike Rentals",
+    color = "Temperature (C)")
+```
+
+The graph above shows the number of bike rentals in Washington DC from 2011 to 2012. The x-axis is dated sequentially to show the relationship between bike rentals during different parts of the year. Furthermore, the graph is colored by the average daily temperature. The graph shows two clear spikes in bike rentals during the middle months of the year—May, June, July, and August—for both 2011 and 2012. These spikes in bike rentals are also supported by higher average daily temperatures. Therefore, this graph suggests that the warmer temperatures, during the middle months of the year, are associated with more bike rentals.
+
+## Question 5
+
+```{r Question_5, fig.height=5, fig.width=9, fig.align='center', warning=FALSE, message=FALSE}
+bike_data %>%
+  ggplot(aes(x = season, y = total_count, fill = season)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Fall" = "orange", 
+                               "Winter" = "lightblue",
+                               "Spring" = "lightgreen",
+                               "Summer" = "red")) +
+  theme_minimal() +
+  labs(title = "Relationship between Bike Rentals and Season in DC, 2011 & 2012",
+       subtitle = "Warmer Seasons asscociated with more Bike Rentals",
+       x = "Season", y = "Bike Rentals", fill = "Season")
+```
+
+The graph above displays the distribution of bike rentals for each season. Similarly to the graph in question 4, there is a spike in the median number of bike rentals during the spring and summer which falls off towards the fall and winter. These results support the conclusions from question 4 which suggests that warmer weather, found in spring and summer months, increase the number of bike rentals. 
+
+## Question 6
+
+```{r Question_6}
+bike_data <- bike_data %>% 
+  mutate(id = row_number())
+
+set.seed(2022)
+
+training_bike_data <- bike_data %>% 
+  slice_sample(prop = .75)
+
+validation_bike_data <- bike_data %>% 
+  anti_join(training_bike_data, by = 'id')
+
+training_bike_data %>% 
+    head(10) %>% 
+    kable() %>% 
+    kable_styling() %>% 
+    scroll_box(width = "100%", height = "400px")
+
+validation_bike_data %>% 
+    head(10) %>% 
+    kable() %>% 
+    kable_styling() %>% 
+    scroll_box(width = "100%", height = "400px")
+
+```
+
+The number of rows from training_bike_data: `r nrow(training_bike_data)`
+
+The number of rows from validation_bike_data: `r nrow(validation_bike_data)`
+
+# Part 3 - Toyota Corolla Dataset
+
+## Load Data
+```{r, message = FALSE}
+corolla_data <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/ToyotaCorolla.csv")
+```
+
+
+## Question 7
+
+```{r Question_7}
+corolla_data <- corolla_data %>%
+  select(Id, Model, Price, Age_08_04, KM, 
+         Fuel_Type, HP, Met_Color, Automatic, cc, 
+         Doors, Quarterly_Tax, Weight) %>%
+  rename_with(tolower) %>%
+  rename(cylinder_vol = cc)
+```
+
+## Question 8
+```{r Question_8}
+corolla_data %>% 
+  head(10) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+
+glimpse(corolla_data)
+summary(corolla_data)
+
+corolla_data %>%
+  summarise_all(~sum(is.na(.))) %>%
+  kable() %>%
+  kable_styling()%>% 
+  scroll_box(width = "100%")
+```
+
+There are no missing values in the Toyota corolla dataset.
+
+## Question 9
+```{r Question_9}
+corolla_data %>%
+  summarise(across(everything(), ~sum(grepl("\\?", .x)))) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%")
+
+corolla_data <- corolla_data %>%
+  mutate(across(where(is.character), ~str_replace_all(.x, "\\?", "")))
+
+corolla_data %>%
+  summarise(across(everything(), ~sum(grepl("\\?", .x)))) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%")
+
+corolla_data %>%
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+```
+
+## Question 10
+```{r Question_10, fig.height=5, fig.width=9, fig.align='center', warning=FALSE, message=FALSE}
+corolla_data %>%
+  select(-id) %>%
+  select_if(is.numeric) %>%
+  cor() %>%
+  round(2) %>%
+  melt() %>%
+  ggplot(aes(x = Var1, y = Var2, fill = value)) +
+    geom_tile() + 
+    geom_text(aes(label = value), color = "white") +
+    scale_fill_gradient2(low = "green", high = "steelblue", guide = "colorbar") +
+    labs(title = "Heatmap of a Correlation Table for Corolla_data", 
+         subtitle = "Darker/Deeper Colors Denote Stronger Correlation",
+         x = "", y = "")
+```
+
+Age and price are the most highly correlated variables in this data set.
+
+## Question 11
+```{r Question_11}
+corolla_data <- corolla_data %>%
+  recipe(~ .) %>%
+  step_mutate(automatic = as.factor(automatic), 
+              met_color = as.factor(met_color)) %>%
+  step_dummy(all_of(c("fuel_type", "met_color", "automatic")), 
+             keep_original_cols = TRUE, 
+             one_hot = TRUE) %>%
+  prep(training = corolla_data) %>%
+  bake(new_data = corolla_data)
+
+corolla_data %>% 
+  head(10) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+```
+
+## Question 12
+```{r Question_12, warning = FALSE}
+set.seed(2022)
+
+first_split <- initial_split(corolla_data, prop = 0.5)
+
+training_corolla <- training(first_split)
+
+second_split <- initial_split(testing(first_split), prop = 0.6)
+
+validation_corolla <- training(second_split)
+testing_corolla <- testing(second_split)
+
+glimpse(training_corolla)
+glimpse(validation_corolla)
+glimpse(testing_corolla)
+```
+
+In modeling, partition data is a common practice to ensure the most efficient and accurate results. When partitioning, the data is divided into three categories: train, validation, and test. First, the training data, which is usually 50% or more of the total data, is used by the model to learn the data. During this step, the model is understanding the mathematical relationship between features and target variables. Second, the validation data, which is usually 20% of the total data, is used to tune the weights of the model to prevent over fitting and for the model architect to change any hyper parameters. Finally, the test data, which is usually 20% of the total data, is used to evaluate the accuracy of the model. During this step the architect of the model asses its performance.  
+
+
+# Project Log
+- Use the following website for scale_x_date() function: https://ggplot2.tidyverse.org/reference/scale_date.html
+- Used the following website for scale_fill_manual() function: https://ggplot2.tidyverse.org/reference/scale_manual.html
+- Used the following website for across() function: https://dplyr.tidyverse.org/reference/across.html
+- Used the following website for everything() function: https://tidyselect.r-lib.org/reference/everything.html
+- Used the following website for grepl() function: https://campus.datacamp.com/courses/intermediate-r/chapter-5-utilities?ex=8
+
+# Honor Code
+I have neither given nor received unauthorized aid on this work.
+
+Alex Wolff, `r Sys.Date()`

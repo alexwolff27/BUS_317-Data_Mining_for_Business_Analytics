@@ -1,0 +1,543 @@
+---
+title: "Final-wolffa24"
+author: "Alex Wolff"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Load Packages
+```{r load_packages, message=FALSE}
+library(tidyverse)
+library(ggmap)         
+library(tidygeocoder)
+library(maps)
+library(zoo)
+library(lubridate)
+library(knitr)
+library(kableExtra)
+library(ggrepel)
+library(RMySQL)
+library(gridExtra)
+library(reshape2)
+library(geosphere)
+
+set.seed(2024)
+```
+
+```{r, echo=FALSE}
+register_google(key = "########")
+register_stadiamaps(key = "########")
+```
+
+
+# Part 1 – Web Scraping & Geospatial Mapping – Breweries, Meaderies, Cideries, and Sake Producers
+
+## Question 1
+```{r question_1, message=FALSE}
+nc_breweries <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/nc_breweries.csv")
+nc_cideries <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/nc_cideries.csv")
+nc_meaderies <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/nc_meaderies.csv")
+nc_sake_producers <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/nc_sake_producers.csv")
+
+ncbreweries <- bind_rows(nc_breweries, nc_cideries, nc_meaderies, nc_sake_producers) %>%
+  mutate(state="North Carolina")
+
+write.csv(ncbreweries, "/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/ncbreweries.csv", row.names = FALSE)
+```
+
+## Question 2
+```{r question_2, message=FALSE}
+ca_breweries <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/ca_breweries.csv")
+ca_cideries <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/ca_cideries.csv")
+ca_meaderies <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/ca_meaderies.csv")
+ca_sake_producers <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/ca_sake_producers.csv")
+
+cabreweries <- bind_rows(ca_breweries, ca_cideries, ca_meaderies, ca_sake_producers)%>%
+  mutate(state="California")
+
+write.csv(cabreweries, "/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/cabreweries.csv", row.names = FALSE)
+```
+
+
+## Question 3
+```{r question_3_1}
+breweries <- bind_rows(ncbreweries, cabreweries)
+
+write.csv(breweries, "/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/breweries.csv", row.names = FALSE)
+
+breweries <- breweries %>%
+  mutate(status = "active",
+         beverage_count = as.numeric(str_trim(beverage_count)),
+         type = factor(type, 
+                       levels = c("Brewpub/Brewery", "Microbrewery", "Brewpub", "Client Brewer", "Commissioner", 
+                                  "Meadery", "Cidery", "Sake Producer", "Contract Brewer", "Commercial Brewery"),
+                       labels = c("Brewpub/Brewery", "Microbrewery", "Brewpub", "Client Brewer", "Commissioner", 
+                                  "Meadery", "Cidery", "Sake Producer", "Contract Brewer", "Commercial Brewery")))
+```
+
+```{r, question_3_2}
+glimpse(breweries)
+
+breweries %>%
+  head(20) %>%
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+```
+
+
+```{r question_3_3, fig.align='center', fig.height=6, fig.width=9, message=FALSE, warning=FALSE}
+for(i in names(breweries)) {
+  if (!i %in% c("url", "name", "status", "city")) {
+    if (is.numeric(breweries[[i]])) {
+      hist <- ggplot(data = breweries, aes_string(x = i)) +
+        geom_histogram(bins = 30) +
+        theme_minimal() +
+        labs(title = paste("Histogram of", i))
+      print(hist)
+    } else {
+      p <- ggplot(data = breweries, aes_string(x = i)) +
+        geom_bar() +
+        theme_minimal() +
+        labs(title = paste("Bar Chart of", i)) + 
+        theme(axis.text.x = element_text(angle = 45, hjust = 1))
+      print(p)
+    }}}
+```
+
+
+## Question 4
+```{r question_4_1, eval=FALSE}
+#breweries_long_lat <- breweries %>% 
+  #distinct(city, state) %>% 
+  #mutate(location = paste(city, state, sep = ", ")) %>% 
+  #tidygeocoder::geocode(location, method = "arcgis")
+
+#write.csv(breweries_long_lat, "/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/breweries_long_lat.csv", row.names = FALSE)
+```
+
+```{r question_4_2, message = FALSE, warning=FALSE}
+breweries_long_lat <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/breweries_long_lat.csv")
+
+glimpse(breweries_long_lat)
+
+breweries_long_lat %>%
+  head(20) %>%
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+```
+
+
+## Question 5
+```{r question_5, fig.align='center', fig.height=12, fig.width=12, message=FALSE, warning=FALSE, out.height='100%', out.width='100%'}
+q5_data <- breweries %>%
+  filter(type %in% c("Cidery", "Meadery", "Sake Producer")) %>%
+  group_by(state, city, type) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  inner_join(breweries_long_lat)
+
+
+generate_map <- function(state_name) {
+  state_data <- q5_data %>% filter(state == state_name)
+  
+  get_map(location = state_name, zoom = 6, source = "stadia", maptype = "stamen_toner_lite") %>%
+  ggmap(base_layer = ggplot(state_data, aes(x = long, y = lat, size = count, color = type))) +
+    geom_point(alpha = 0.6) +
+    scale_size(range = c(3, 12)) +
+    theme_void() +
+    labs(title = paste("Cideries, Meaderies, and Sake Producers in", state_name))
+}
+
+map_nc <- generate_map("North Carolina")
+map_ca <- generate_map("California")
+
+grid.arrange(map_nc, map_ca, nrow = 2)
+```
+
+## Question 6
+```{r question_6_1, message = FALSE}
+cities_la <- c("Los Angeles", "Anaheim", "Burbank", "Carson", "Chino", "Chino Hills",
+               "Compton", "Costa Mesa", "Corona", "Diamond Bar", "Fontana", "Fullerton",
+               "Garden Grove", "Glendale", "Hesperia", "Huntington Beach", "Inglewood",
+               "Irvine", "Laguna Beach", "Lancaster", "Long Beach", "Menifee", "Mission Viejo",
+               "Moreno Valley", "Murrieta", "Newport Beach", "Norwalk", "Ontario", "Orange",
+               "Oxnard", "Palmdale", "Pasadena", "Pomona", "Rancho Cucamonga", "Rialto",
+               "Riverside", "San Dimas", "San Bernardino", "San Clemente", "Santa Ana",
+               "Santa Clarita", "Santa Monica", "Simi Valley", "Thousand Oaks", "Temecula",
+               "Torrance", "Tustin", "Ventura", "Victorville", "West Covina", "Westminster", "Whittier")
+
+cities_sf <- c("Alameda", "Albany", "American Canyon", "Antioch", "Atherton", "Belmont", 
+               "Belvedere", "Benicia", "Berkeley", "Brentwood", "Brisbane", "Burlingame",
+               "Calistoga", "Campbell", "Clayton", "Cloverdale", "Colma", "Concord",
+               "Corte Madera", "Cotati", "Cupertino", "Daly City", "Danville", "Dixon",
+               "Dublin", "East Palo Alto", "El Cerrito", "Emeryville", "Fairfax",
+               "Fairfield", "Foster City", "Fremont", "Gilroy", "Half Moon Bay", "Hayward",
+               "Healdsburg", "Hercules", "Hillsborough", "Lafayette", "Larkspur",
+               "Livermore", "Los Altos", "Los Altos Hills", "Los Gatos", "Martinez",
+               "Menlo Park", "Mill Valley", "Millbrae", "Milpitas", "Monte Sereno",
+               "Moraga", "Morgan Hill", "Mountain View", "Napa", "Newark", "Novato",
+               "Oakland", "Oakley", "Orinda", "Pacifica", "Palo Alto", "Petaluma",
+               "Piedmont", "Pinole", "Pittsburg", "Pleasant Hill", "Pleasanton",
+               "Portola Valley", "Redwood City", "Richmond", "Rio Vista", "Rohnert Park",
+               "Ross", "St. Helena", "San Anselmo", "San Bruno", "San Carlos", 
+               "San Francisco", "San Jose", "San Leandro", "San Mateo", "San Pablo",
+               "San Rafael", "San Ramon", "Santa Clara", "Santa Rosa", "Saratoga",
+               "Sausalito", "Sebastopol", "Sonoma", "South San Francisco", "Suisun City",
+               "Sunnyvale", "Tiburon", "Union City", "Vacaville", "Vallejo", 
+               "Walnut Creek", "Windsor", "Woodside", "Yountville")
+
+```
+
+```{r question_6_2, fig.align='center', fig.height=12, fig.width=12, message=FALSE, warning=FALSE}
+options(ggrepel.max.overlaps = Inf)
+
+q6_data <- breweries %>%
+  filter(type %in% c("Brewpub", "Microbrewery", "Client Brewer", "Brewpub/Brewery", "Commissioner")) %>%
+  group_by(state, city, type) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  inner_join(breweries_long_lat)
+
+generate_map <- function(city_name, cities) {
+  city_data <- q6_data %>% filter(city %in% cities)
+  
+  get_map(location = city_name, zoom = 9, source = "stadia", maptype = "stamen_toner_lite") %>%
+  ggmap(base_layer = ggplot(city_data, aes(x = long, y = lat, size = count, color = type))) +
+    geom_point(alpha = 0.6) +
+    scale_size(range = c(3, 12)) +
+    theme_void() +
+    labs(title = paste("Breweries in", city_name))
+}
+
+map_la <- generate_map("Los Angeles", cities_la)
+map_sf <- generate_map("San Francisco", cities_sf)
+
+grid.arrange(map_la, map_sf, nrow = 2)
+```
+
+## Question 7
+```{r question_7_1, message = FALSE}
+breweries_url <- breweries %>%
+  filter(state == "California",
+         !(type %in% c("Contract Brewers", "Commercial Brewers", "Cidery", "Meadery", "Sake Producer"))) %>%
+  group_by(city) %>%
+  filter(n() >= 10) %>%
+  ungroup %>%
+  select(url)
+
+write.csv(breweries_url, "/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/breweries_url.csv", row.names = FALSE)
+```
+
+```{r question_7_2, messages = FALSE, eval = FALSE}
+#ca_addresses <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/octoparse_addresses.csv") %>%
+  #tidygeocoder::geocode(address, method = "census")
+
+#write.csv(ca_addresses, "/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/ca_addresses.csv", row.names = FALSE)
+```
+
+```{r question_7_3, message=FALSE}
+ca_addresses <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/ca_addresses.csv")
+
+ca_addresses %>%
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+
+ca_addresses %>%
+  filter(is.na(long) | is.na(lat)) %>%
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+
+write.csv(na.omit(ca_addresses), "/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/ca_addresses_cleaned.csv", row.names = FALSE)
+```
+
+```{r question_7_4, message=FALSE}
+ca_addresses_cleaned <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/ca_addresses_cleaned.csv")
+
+ca_addresses_cleaned %>%
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+```
+
+```{r question_7_5, warning = FALSE, message=FALSE}
+data_1 <- ca_addresses_cleaned %>%
+  inner_join(breweries, by = "name") %>%
+  select(city, long, lat, name, type)
+
+data_1 %>%
+  inner_join(data_1, by = "city") %>%
+  group_by(city) %>%
+  mutate(dist = distHaversine(cbind(long.x, lat.x), cbind(long.y, lat.y))) %>%
+  filter(!dist == 0) %>%
+  summarize(avg_dist = mean(dist)) %>%
+  arrange(avg_dist) %>%
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+```
+
+```{r question_7_6, fig.align='center', fig.height=12, fig.width=12, message=FALSE, warning=FALSE}
+options(ggrepel.max.overlaps = Inf)
+
+berkeley_data <- ca_addresses_cleaned %>%
+  inner_join(breweries) %>%
+  filter(city == "Berkeley")
+
+berkeley_map <- get_map(location = "Berkeley", zoom = 13, source = "stadia", maptype = "stamen_toner_lite")
+ggmap(berkeley_map) +
+  geom_point(data = berkeley_data, aes(x = long, y = lat, color = type), alpha = 0.6, size = 5) +
+  geom_text_repel(data = berkeley_data, aes(x = long, y = lat, label = name), size = 5, point.padding = 0.5) +
+  theme_void() +
+  labs(title = "Breweries in Berkeley")
+```
+
+
+# Part 2 – Office Express
+
+## Database connection
+```{r database_connection}
+db = dbConnect(MySQL(), 
+               user =  'ofx_user',
+               password = 'TestyTester#2024',
+               dbname = 'ofx',
+               host = 'ballenger.wlu.edu')
+
+category <- fetch(dbSendQuery(db, "SELECT * FROM category"), n=-1)
+product <- fetch(dbSendQuery(db, "SELECT * FROM product"), n=-1)
+order_product <- fetch(dbSendQuery(db, "SELECT * FROM order_product"), n=-1)
+buyer <- fetch(dbSendQuery(db, "SELECT * FROM buyer"), n=-1)
+location <- fetch(dbSendQuery(db, "SELECT *FROM location"), n=-1)
+orders <- fetch(dbSendQuery(db, "SELECT *FROM orders"), n=-1)
+```
+
+## Data Preperation and EDA
+```{r geocoding_location, eval=FALSE}
+#location_long_lat <- location %>% 
+  #distinct(City, State) %>% 
+  #mutate(city_state = paste(City, State, sep = ", ")) %>% 
+  #tidygeocoder::geocode(city_state, method = "arcgis")
+
+#write.csv(location_long_lat, "/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/location_long_lat.csv", row.names = FALSE)
+```
+
+```{r, message=FALSE}
+location_long_lat <- read.csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/location_long_lat.csv") %>%
+  rename_with(tolower)
+```
+
+```{r data_prep_functions}
+data_cleaning <- function(data) {
+  data %>%
+    na.omit %>%
+    rename_with(tolower)
+}
+
+eda <- function(data) {
+  glimpse(data)
+  
+  data%>%
+    head(20) %>%
+    kable() %>% 
+    kable_styling() %>% 
+    scroll_box(width = "100%", height = "400px")
+}
+```
+
+```{r eda}
+category <- data_cleaning(category)
+eda(category)
+
+product <- data_cleaning(product)
+eda(product)
+
+order_product <- data_cleaning(order_product)
+eda(order_product)
+
+buyer <- data_cleaning(buyer)
+eda(buyer)
+
+location_long_lat <- data_cleaning(location_long_lat)
+eda(location_long_lat)
+
+location <- data_cleaning(location)
+eda(location)
+
+orders <- data_cleaning(orders)
+eda(orders)
+```
+
+```{r graphical_eda, fig.align='center', fig.height=6, fig.width=9, message=FALSE, warning=FALSE}
+list_df <- c("category", "product", "order_product", "buyer", "order", "location")
+
+for (df_name in list_df) {
+  df <- get(df_name)
+  
+  for(column in names(df)) {
+    if (!column %in% c("product_id", "order_id", "buyer_id", 
+                       "city", "postal_code", "ship_date", "ship_mode",
+                       "sub_category", "last_name", "first_name", "product_name")) {
+      if (is.numeric(df[[column]])) {
+        hist <- ggplot(data = df, aes_string(x = column)) +
+          geom_histogram(bins = 30) +
+          theme_minimal() +
+          labs(title = paste("Histogram of", column))
+        print(hist)
+      } else {
+        p <- ggplot(data = df, aes_string(x = column)) +
+          geom_bar() +
+          theme_minimal() +
+          labs(title = paste("Bar Chart of", column)) +
+          theme(axis.text.x = element_text(angle = 45, hjust = 1))
+        print(p)
+      }}}}
+```
+
+From the Category bar chart we can conclude that office supplies are the products that are most sold followed by furniture and technology. The histogram for quantity indicates a rights skewed unimodal distribution with the most common purchased quantities being 2 and 3. The histogram of unit_price shows a right skewed unimodal distribution with the most common price being under 100 dollars. The histogram for discounts shows the most common discounts are either 0%, or no discount at all, and 20%. The histogram for gross profit per unit shows a mostly normal distribution with the average profit being slightly greater than 0. The bar chart of for the type of consumer indicates that consumers are the most prominent customers followed by corporate and home offices. The bar chart for the distribution of state shows the states with the most purchases are California and Texas, most likely due to the their large populations. Finally, the bar chart for region shows the central and west regions are the greatest consumers followed by south and east. 
+
+# 1. Key Finding - Geospacial Mapping
+```{r key_finding_1, message=FALSE, warning=FALSE, fig.height=7, fig.width=10, fig.align='center'}
+key_finding_1 <- order_product %>%
+  inner_join(orders) %>%
+  inner_join(location) %>%
+  inner_join(location_long_lat) %>%
+  inner_join(buyer) %>%
+  select(long, lat, quantity, city, type) %>%
+  na.omit() %>%
+  group_by(city, long, lat, type) %>%
+  summarise(total_quantity = sum(quantity, na.rm = TRUE), .groups = "drop") 
+  
+get_map(location = 'usa', zoom = 4, source = "stadia", maptype = "stamen_toner_lite") %>%
+  ggmap(base_layer = ggplot(key_finding_1, aes(x = long, y = lat, size = total_quantity, color = type))) +
+    geom_point(alpha = .5) +
+    theme_void() +
+    labs(title = "Order Quantities by Cities in the US")
+```
+The visualization above is map of the order quantities by cities by type in the US. The size of the dot is relative to the number of orders and the color is associated with the type of buyer. As expected, metropolitan areas in the northeast, such as New York, Washington, and Boston, and the west cost, such as San Francisco, Los Angeles and Seattle, have the highest order quantities in the country. Furthermore, the type of buyer is distributed evenly throughout the county. 
+
+# 2. Key Finding - Seasonal Distributions
+
+```{r key__finding_2, message=FALSE, warning=FALSE, fig.height=7, fig.width=10, fig.align='center'}
+orders %>%
+  inner_join(order_product) %>%
+  mutate(
+    month = month(ymd(order_date)),
+    season = case_when(
+      month %in% 3:5   ~ "Spring",
+      month %in% 6:8   ~ "Summer",
+      month %in% 9:11  ~ "Fall",
+      month %in% c(12, 1, 2)  ~ "Winter"
+    )) %>%
+  inner_join(order_product)%>%
+  inner_join(product) %>%
+  inner_join(category) %>%
+  group_by(category, season) %>%
+  summarise(number_sold = sum(quantity), .groups = "drop") %>%
+  ggplot(aes(x = season, y = number_sold, fill = season)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ category) +
+  labs(title = "Seasonal Sales by Product Category",
+       x = "Season",
+       y = "Number Sold") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+The visualization above represents seasonal sales by product category. From the graph we can concluded that most sales occur during fall for each product category. Furthermore, winter, summer, and spring average the same number of sales for the three product categories. Office supplies produce significantly more sales than the other product categories. 
+
+# 3. Key Finding - Worst Preforming Sub-Categories
+
+```{r key_finding_3, message=FALSE, warning=FALSE, fig.height=7, fig.width=10, fig.align='center'}
+order_product %>%
+  inner_join(product) %>%
+  group_by(sub_category) %>%
+  summarize(avg_margin = mean(gross_profit_per_unit / unit_price),
+            avg_discount = mean(discount)) %>%
+  arrange(avg_margin) %>%
+  slice(1:10) %>%
+  mutate(sub_category = factor(sub_category, levels = sub_category)) %>%
+  ggplot(aes(x = sub_category, y = avg_margin, fill = avg_discount)) +
+    geom_bar(stat = "identity", position = "identity") +
+    theme_minimal() +
+    labs(title = "Bar Chart of Top 10 Worst Margins by Product Sub-Categories",
+         x = "Sub-Category",
+         y = "Average Profit Margin",
+         fill = "Average Discount (%)") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The graph above represents the top 10 worst margins by product sub-category. Furthermore, the color represents the average discount rate applied to that product when sold. From the graph we can conclude that binders have the worst margins followed by appliances and tables. Finally, from the graph we can also see the sub-categories with negative margins have higher discount rates than the products with positive margins for the worst performing sub-categories.
+
+# 4. Key Finding - South FLorida Analysis
+
+```{r, key_finding_4, message=FALSE, warning=FALSE, fig.height=7, fig.width=10, fig.align='center'}
+key_finding_4 <- order_product %>%
+  inner_join(orders) %>%
+  inner_join(location) %>%
+  inner_join(location_long_lat) %>%
+  inner_join(buyer) %>%
+  filter(state == "Florida") %>%
+  group_by(long, lat, type) %>%
+  summarise(avg_margin = mean(gross_profit_per_unit / unit_price), 
+            total_quantity = sum(quantity, na.rm = TRUE), 
+            .groups = "drop") 
+  
+get_map(location = 'Fort Lauderdale', zoom = 9, source = "stadia", maptype = "stamen_toner_lite") %>%
+  ggmap(base_layer = ggplot(key_finding_4, aes(x = long, y = lat, size = total_quantity, color = avg_margin))) +
+    geom_point(alpha = .5) +
+    scale_size(range = c(5, 10)) +
+    theme_void() +
+    labs(title = "Order Quantites and Margins in South Florida", 
+         color = "Margins",
+         size = "Total Quantity")
+```
+
+The visualization above shows a map of South Florida with dots at each of the location products were sold; the size of the dots represents the total quantity purchased and the color represents the average gross profit per unit sold. The graph shows the distributions of quantity sizes to be mostly uniform and average profit to be at or near zero. Finally, the graph also shows the locations of the purchases to be decentralized in South Florida. 
+
+# 5. Key Finding - Bar Chart of Margins
+```{r key_finding_5, message=FALSE, warning=FALSE, fig.height=7, fig.width=10, fig.align='center'}
+order_product %>%
+  inner_join(orders) %>%
+  inner_join(location) %>%
+  select(city, quantity, unit_price, gross_profit_per_unit, region) %>%
+  group_by(city, region) %>%
+  summarize(avg_margin = mean(gross_profit_per_unit / unit_price), .groups = "drop") %>%
+  arrange(desc(avg_margin)) %>%
+  slice_max(order_by = avg_margin, n = 25) %>%
+  ggplot(aes(x = reorder(city, desc(avg_margin)), y = avg_margin, fill = region)) +
+    geom_bar(stat = "identity", position = "identity") +
+    theme_minimal() +
+    labs(title = "Bar Chart of Top 25 Cities by Highest Margins",
+         x = "City",
+         y = "Average Margin",
+         fill = "Region") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The visualization above represents the top 25 highest margins by city, which are colored by region. The city with the highest margin is Atlantic city with 50%, followed by Grand Island and Summertime. Furthermore, the coloration of the regions indicates each region is evenly distributed in terms of high margins. In other word, there is not a standout regions with high profit margins.
+
+# 6. Key Finding - Scatter Plot: Discount Rate/Profit Margin
+
+```{r key_finding_6, message=FALSE, warning=FALSE, fig.height=7, fig.width=10, fig.align='center'}
+order_product %>%
+  inner_join(product) %>%
+  inner_join(category) %>%
+  ggplot(aes(x = discount, y = gross_profit_per_unit / unit_price, color = category)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Relationship between Discount and Profit Margin",
+    x = "Discount Rate",
+    y = "Profit Margin")
+```
+
+The visualization above shows the relationship between profit margins and discount rate. From this graph we can conclude that products start reaching negative margins when sold at a discount rate of greater than 20%. Furthermore, we can conclude that each product category crosses the negative margin threshold at different discount rates with furniture being first, followed by office supplies and technology. In other words, discounted technology products retain positive profit margins at higher discount rates. 
+
+## Project Log
+Used the following link to find the distHaversine function: https://www.rdocumentation.org/packages/geosphere/versions/1.5-18/topics/distHaversine
+
+## The Pledge
+
+I have neither given nor received unauthorized aid on this work.
+
+Alex Wolff, `r Sys.Date()`

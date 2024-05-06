@@ -1,0 +1,284 @@
+---
+title: "Project 1 – Advanced Data Exploration & Data Wrangling"
+author: "Alex Wolff"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Load Packages
+```{r load_packages, message=FALSE}
+library(tidyverse)
+library(kableExtra)
+library(nycflights13)
+options(scipen=999)
+```
+
+# Part 1
+
+## Load Data 1
+```{r load_data_1, message=FALSE}
+bike_data <- dn <- read_csv("/home/ballengerb@ad.wlu.edu/BUS_317_01/wolffa24/Data/bike_share_day.csv")
+```
+
+## Question 1
+```{r question_1_1}
+bike_data <- bike_data %>%
+  rename(index=instant,
+         date = dteday,
+         year = yr,
+         month = mnth,
+         ftemp = atemp,
+         humidity = hum,
+         casual_cnt = casual,
+         registered_cnt = registered,
+         total_count = cnt)
+```
+
+```{r question_1_2}
+bike_data %>% 
+    head(50) %>% 
+    kable() %>% 
+    kable_styling() %>% 
+    scroll_box(width = "100%", height = "400px")
+```
+
+```{r question_1_3}
+eda <- function(df) {
+  glimpse(df)
+  summary(df)}
+
+eda(bike_data)
+```
+
+There are `r sum(is.na(bike_data))` missing observations.
+
+## Question 2
+```{r question_2}
+bike_data <- bike_data %>%
+  mutate(
+    season = factor(season, 
+                    levels = c(2, 3, 4, 1), 
+                    labels = c("spring", 
+                               "summer", 
+                               "fall", 
+                               "winter")),
+    holiday = factor(holiday, 
+                     levels = c(0, 1), 
+                     labels = c("no", 
+                                "yes")),
+    workingday = factor(workingday, 
+                        levels = c(0, 1), 
+                        labels = c("no", 
+                                   "yes")),
+    year = factor(year, 
+                  levels = c(0, 1), 
+                  labels = c("2011", 
+                             "2012")),
+    weathersit = factor(weathersit, 
+                        levels = c(1, 2, 3, 4), 
+                        labels = c("clear", 
+                                   "mist", 
+                                   "light precipitation", 
+                                   "heavy precipitation")))
+
+bike_data %>%
+  kable() %>% 
+  kable_styling() %>% 
+  scroll_box(width = "100%", height = "400px")
+```
+
+## Question 3
+```{r question_3_1}
+bike_data <- bike_data %>%
+  mutate(
+    raw_temp = temp * 41,
+    raw_ftemp = ftemp * 50,
+    raw_humidity = humidity * 100,
+    raw_windsped = windspeed * 67)
+
+glimpse(bike_data)
+```
+
+### Checking Datatypes
+```{r question_3_2}
+data.frame(
+  Datatypes = sapply(bike_data, class)) %>%
+  kable() %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "400px")
+```
+
+## Question 4
+```{r question_4}
+bike_data %>%
+  filter(!(casual_cnt + registered_cnt == total_count)) %>%
+  kable() %>%
+  kable_styling() %>%
+  scroll_box(width = "100%")
+```
+
+There are no observations that don't add up.
+
+# Part 2
+
+## Question 5
+
+### EDA for Flights Dataset
+```{r question_5_flights}
+eda(flights)
+```
+
+### EDA for Airlines Dataset
+```{r question_5_airlines}
+eda(airlines)
+```
+
+### EDA for Planes Dataset
+```{r question_5_planes}
+eda(planes)
+```
+
+### EDA for Weather Dataset
+```{r question_5_weather}
+eda(weather)
+```
+
+### EDA for Airports Dataset
+```{r question_5_airports}
+eda(airports)
+```
+
+## Question 6
+```{r question_6}
+flights %>%
+  group_by(dest) %>%
+  summarise(n = n()) %>%
+  rename(destination = dest, flight_count = n) %>%
+  arrange(desc(flight_count)) %>%
+  head(10) %>%
+  kable() %>%
+  kable_styling()
+```
+
+## Question 7
+```{r question_7}
+flights %>%
+  inner_join(airlines, by = "carrier") %>%
+  group_by(name) %>%
+  summarise(n = n()) %>%
+  rename(airline_name = name, flight_frequency_2013 = n) %>%
+  arrange(desc(flight_frequency_2013)) %>%
+  kable() %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "400px")
+```
+
+## Question 8
+```{r question_8}
+flights %>%
+  inner_join(airlines, by = "carrier") %>%
+  group_by(name, carrier) %>%
+  summarise(mean_arrival_delay = mean(arr_delay, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(mean_arrival_delay)) %>%
+  select(name, carrier, mean_arrival_delay) %>%
+  slice(1, n()) %>%
+  kable() %>%
+  kable_styling()
+```
+
+Frontier Airlines Inc. has the highest mean arrival delay of 21.92 minutes and US Airways Inc. has the lowest with -9.93 minutes. 
+
+## Question 9
+
+### Part 1
+```{r question_9_part1}
+flights %>%
+  arrange(desc(dep_delay)) %>%
+  slice(5) %>%
+  select(origin, month, day, dep_delay) %>%
+  kable() %>%
+  kable_styling()
+```
+
+### Part 2
+```{r question_9_part2}
+weather %>%
+  filter(day == 22, 
+         month == 7,
+         origin == "JFK") %>%
+  summarise(median_temp = median(temp, na.rm=TRUE)) %>%
+  kable() %>%
+  kable_styling()
+```
+
+The median temperature at the origin airport on the day with the fifth highest departure delay is 76.46 degrees.
+
+### Part 3
+```{r question_9_part3, message=FALSE}
+flights %>%
+  arrange(desc(dep_delay)) %>%
+  slice(5) %>%
+  select(year, month, day, origin, dep_delay) %>%
+  inner_join(select(weather, year, month, day, origin, temp), by = c("year", "month", "day", "origin")) %>%
+  inner_join(select(airports, faa, name), by = c("origin" = "faa")) %>%
+  group_by(origin, name, month, day, dep_delay) %>%
+  summarize(median_temp = median(temp, na.rm = TRUE), .groups = "drop") %>%
+  kable() %>%
+  kable_styling()
+```
+
+## Question 10
+```{r question_10}
+flights %>%
+  mutate(
+    delay = if_else(dep_delay > 0, 1, 0),
+    time_intervals = case_when(
+      sched_dep_time >= 001 & sched_dep_time <= 600 ~ "12:01am-6am",
+      sched_dep_time >= 601 & sched_dep_time <= 1200 ~ "6:01am-12pm",
+      sched_dep_time >= 1201 & sched_dep_time <= 1800 ~ "12:01pm-6pm",
+      sched_dep_time >= 1801 & sched_dep_time <= 2400 ~ "6:01pm-12am")) %>%
+  group_by(time_intervals) %>%
+  summarise(delay_proportion = round(sum(delay, na.rm=TRUE) / n(), 2)) %>%
+  arrange(delay_proportion) %>%
+  kable() %>%
+  kable_styling()
+```
+
+As the day advances, the probability of flight delays rises. Consequently, the time frame from 12:01 am to 6:00 am has the lowest likelihood of delays, while the period from 6:01 pm to 12:00 am is the most prone to delays. This pattern stems from the gradual increase in flight traffic over the course of the day. Airlines schedule more flights during daylight hours to accommodate people's schedules, leading to heightened traffic and a greater chance of delays.
+
+## Question 11
+```{r question_11}
+flights %>%
+  arrange(desc(air_time)) %>%
+  slice(5) %>%
+  inner_join(planes, by = "tailnum") %>%
+  select(air_time, dest, seats) %>%
+  kable() %>%
+  kable_styling() 
+```
+
+## Question 12
+```{r question_12, fig.height=5, fig.width=9, fig.align='center'}
+airports %>%
+  filter(lat <= 49.38447222222222 & lat >= 24.520833333333332,
+         lon <= -66.94702777777778 & lon >= -124.77169444444445) %>%
+  rename(Longitude = lon,
+         Latitude = lat) %>%
+  ggplot(mapping = aes(x = Longitude, 
+                       y = Latitude, 
+                       color = Longitude, 
+                       alpha = .5)) +
+  geom_point() + 
+  labs(title = "Map of Airports in the Contiguous United States")
+```
+
+Based on the visualization for longitude, the east coast of the contiguous United States has a higher concentration of airports than the west coast. The Midwest contiguous United States has the lowest concentration of airports. 
+
+## Project Log
+Used the following website for the sapply function: https://www.rdocumentation.org/packages/memisc/versions/0.99.31.7/topics/Sapply
+
+## The Pledge
+
+On my honor, I have neither given nor received any unacknowledged aid on this assignment.
+
+Alex Wolff, `r Sys.Date()`
