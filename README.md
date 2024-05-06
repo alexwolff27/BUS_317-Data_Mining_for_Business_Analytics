@@ -1,5 +1,9 @@
 # BUS 317 - Data Mining for Business Analytics
 
+This repository includes several R Markdown files created for business analytics courses, designed to demonstrate data analysis and visualization techniques in R.
+
+File Descriptions:
+
 Final-wolffa24.Rmd - Extensive geographic data processing and visualization, using R packages like ggmap, tidygeocoder, and geosphere. Involves key API integrations for map data retrieval and manipulation.
 
 Project-1-wolffa24.Rmd - Focuses on advanced data exploration techniques and data wrangling, using the nycflights13 and bike sharing datasets to demonstrate practical applications of these methods.
